@@ -6,7 +6,7 @@
 #' @export
 
 log_like_hamming = function(res, thresh = 0.975, risks_method = "linear",
-                            riskPlot = FALSE, scale_factor = 1.0,
+                            LipschitzPlot = FALSE, scale_factor = 1.0,
                             shift_factor = 0.0, weightsPlot = FALSE)
 {
   require(Rfast) ## needed for rowMaxs() and colMaxs()
@@ -43,30 +43,31 @@ log_like_hamming = function(res, thresh = 0.975, risks_method = "linear",
   }
 
   ## Compute by record risks \in (0,1) - only include MCMC draws used to compose L
-  log_ratio_data       <- colMaxs(logthresh_ratio,value=TRUE) ## 1 x N (by col) maxima of log-ratio over records for *each* record
+  Lipschitz_by_record       <- colMaxs(logthresh_ratio,value=TRUE) ## 1 x N (by col) maxima of log-ratio over records for *each* record
   if( risks_method == "linear")
   {
     f_linres  <- function(x){(x-min(x))/(max(x)-min(x))}
-    risks     <- f_linres( log_ratio_data ) ## \in (0,1)
+    risks     <- f_linres( Lipschitz_by_record ) ## \in (0,1)
   }else{
     if( risks_method == "softmax")
     {
       f_softmax <- function(x){(1.0/(1.0+exp(-1.69897*(x-mean(x))/sd(x))))}
-      risks     <- f_softmax( log_ratio_data ) ## \in (0,1)
+      risks     <- f_softmax( Lipschitz_by_record ) ## \in (0,1)
     }else{ ## weight_method == "logistic"
       f_logistic <- function(x,factor=0.5){f_x = (1/(1+exp(-factor*x)))*2-1}
-      risks      <- f_logistic( log_ratio_data ) ## \in (0,1)
+      risks      <- f_logistic( Lipschitz_by_record ) ## \in (0,1)
     }
   } ## end condition on which weight method to apply to convert L_i from R^+ to (0,1)
 
-  if (riskPlot) {
-    dat_lr  <-  risks %>% as_tibble()
-    names(dat_lr) <- c("Risks")
-    ## density plot
+  if (LipschitzPlot) {
+    dat_lr  <-  Lipschitz_by_record %>% as_tibble()
+    names(dat_lr) <- c("Lipschitz")
+    ## violin plot
     print(
-      ggplot(dat_lr, aes(Risks)) +
-        geom_density(alpha=0.1, adjust = 1.5) + theme_bw() +
-        xlab("Record level Risks in (0,1)") + ylab("Density")
+      ggplot(dat_lr, aes(y=Lipschitz, x = "")) +
+        geom_violin(trim=TRUE, alpha = 0.3) +
+        theme_bw(base_size = 15) +
+        ylab("Record-level Lipschitz bounds") + xlab("")
     )
   }
 
@@ -77,15 +78,16 @@ log_like_hamming = function(res, thresh = 0.975, risks_method = "linear",
   if (weightsPlot) {
     dat_lr  <-  weights %>% as_tibble()
     names(dat_lr) <- c("Weights")
-    ## density plot
+    ## violin plot
     print(
-      ggplot(dat_lr, aes(Weights)) +
-        geom_density(alpha=0.1, adjust = 1.5) + theme_bw() +
-        xlab("Record level Weights") + ylab("Density")
+      ggplot(dat_lr, aes(y=Weights, x= "")) +
+        geom_violin(trim=TRUE, alpha = 0.3) +
+        theme_bw(base_size = 15) +
+        ylab("Record-level Weights") + xlab("")
     )
   }
 
   return(list(log_ratio = log_ratio, logthresh_ratio = logthresh_ratio, log_ratio_theta = log_ratio_theta,
-              log_ratio_data = log_ratio_data, S_excl = S_excl, L = L, risks = risks, weights = weights))
+              Lipschitz_by_record = Lipschitz_by_record, S_excl = S_excl, L = L, risks = risks, weights = weights))
 
 } ## end function log_like_hamming() to compute Lipschitz bound under Hamming-1 distance
