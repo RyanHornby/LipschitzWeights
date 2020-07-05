@@ -3,9 +3,10 @@
 #'
 #' @import Rfast
 #' @import superheat
+#' @import tidyverse
 #' @export
 
-log_like_hamming = function(res, thresh = 0.975, risks_method = "linear",
+log_like_hamming = function(res, thresh = 1.00, risks_method = "linear",
                             LipschitzPlot = FALSE, scale_factor = 1.0,
                             shift_factor = 0.0, weightsPlot = FALSE)
 {
@@ -60,6 +61,7 @@ log_like_hamming = function(res, thresh = 0.975, risks_method = "linear",
   } ## end condition on which weight method to apply to convert L_i from R^+ to (0,1)
 
   if (LipschitzPlot) {
+    require(tidyverse)
     dat_lr  <-  Lipschitz_by_record %>% as_tibble()
     names(dat_lr) <- c("Lipschitz")
     ## violin plot
@@ -76,6 +78,7 @@ log_like_hamming = function(res, thresh = 0.975, risks_method = "linear",
   weights[weights >= 1] = 1
 
   if (weightsPlot) {
+    require(tidyverse)
     dat_lr  <-  weights %>% as_tibble()
     names(dat_lr) <- c("Weights")
     ## violin plot
@@ -90,4 +93,171 @@ log_like_hamming = function(res, thresh = 0.975, risks_method = "linear",
   return(list(log_ratio = log_ratio, logthresh_ratio = logthresh_ratio, log_ratio_theta = log_ratio_theta,
               Lipschitz_by_record = Lipschitz_by_record, S_excl = S_excl, L = L, risks = risks, weights = weights))
 
-} ## end function log_like_hamming() to compute Lipschitz bound under Hamming-1 distance
+}
+
+
+#'
+#' @import rstanarm
+#' @import gridExtra
+#' @import tidyverse
+#' @export
+
+syn = function(data, modelString = "outcome ~ 1", chains = 1, iterations = 1000,
+               scale_factor = 1.0, shift_factor = 0.0, c = 0.95, thresh = 1.00,
+               risks_method = "linear", m = 20, thin = 5, plots = FALSE) {
+  require(rstanarm)
+  ###########################################################################
+  ######################## unweighted, fit, and DP risks ####################
+  ###########################################################################
+  fit_notw <- stan_glm(
+    modelString,
+    data = data,
+    family = poisson(link="log"),
+    prior = normal(0, 2, autoscale = FALSE),
+    refresh = 0,
+    chains = chains, iter = iterations
+  )
+
+  log_lik_notw <- log_lik(fit_notw)
+
+  res_notw <- list(log_lik = log_lik_notw)
+
+  loglike_notw <- log_like_hamming(res = res_notw, thresh = 1.00,
+                                         risks_method = "linear",
+                                         scale_factor = scale_factor,
+                                         shift_factor = shift_factor,
+                                         LipschitzPlot = FALSE, weightsPlot = FALSE)
+
+  risks_notw        <- loglike_notw$risks
+  print(mean(risks_notw))
+  Lipschitz_notw    <- loglike_notw$Lipschitz_by_record
+
+  ###########################################################################
+  ################## LW weights, fit, and DP risks ##########################
+  ###########################################################################
+
+  weights_LW <- loglike_notw$weights
+  print(mean(weights_LW))
+
+  assign("weights_LW", weights_LW, globalenv())
+
+  fit_LW <- stan_glm(
+    modelString,
+    data = data,
+    family = poisson(link="log"),
+    weights = weights_LW,
+    prior = normal(0, 2, autoscale = FALSE),
+    refresh = 0,
+    chains = chains, iter = iterations
+  )
+
+  print("1")
+
+  rm(list = c("weights_LW"), envir = globalenv())
+
+  log_lik_LW <- log_lik(fit_LW)
+
+  res_LW <- list(log_lik = log_lik_LW)
+
+  loglike_LW <- log_like_hamming(res = res_LW, thresh = 1.00,
+                                       risks_method = "linear",
+                                       scale_factor = scale_factor,
+                                       shift_factor = shift_factor,
+                                       LipschitzPlot = FALSE, weightsPlot = FALSE)
+  print("2")
+  risks_LW       <- loglike_LW$risks
+  Lipschitz_LW    <- loglike_LW$Lipschitz_by_record
+
+  L_LW_all        <- loglike_LW$log_ratio_theta
+  L_LW            <- loglike_LW$L
+  ###########################################################################
+  ################## LW weights reweight, fit, DP risks, and synthesize #####
+  ###########################################################################
+  weights_LW_final <- weights_LW * L_LW / L_LW_all * c
+  weights_LW_final[weights_LW_final > 1] <- 1
+  weights_LW_final[weights_LW_final < 0] <- 0
+
+  assign("weights_LW_final", weights_LW_final, globalenv())
+
+  print("3")
+
+  fit_LW_final <- stan_glm(
+    modelString,
+    data = data,
+    family = poisson(link="log"),
+    weights = weights_LW_final,
+    prior = normal(0, 2, autoscale = FALSE),
+    refresh = 0,
+    chains = chains, iter = iterations
+  )
+  print("4")
+
+  rm(list = c("weights_LW_final"), envir = globalenv())
+
+  log_lik_LW_final <- log_lik(fit_LW_final)
+
+  res_LW_final <- list(log_lik = log_lik_LW_final)
+
+  loglike_LW_final <- log_like_hamming(res = res_LW_final, thresh = 1.00,
+                                             risks_method = "linear",
+                                             scale_factor = scale_factor,
+                                             shift_factor = shift_factor,
+                                             LipschitzPlot = FALSE, weightsPlot = FALSE)
+  print("5")
+  risks_LW_final        <- loglike_LW_final$risks
+  Lipschitz_LW_final    <- loglike_LW_final$Lipschitz_by_record
+  #### synthesis ####
+  N = length(data[,1])
+  draws <- as.data.frame(fit_LW_final)
+  start <- 500 / 2
+  syndata <- vector("list", m)
+  for (i in 1:m){
+    draws_exp <- exp(draws[start + thin * (i - 1), ])
+    syndata[[i]] <- rpois(N, draws_exp)
+  }
+
+  ###########################################################################
+  ################## Plots ##################################################
+  ###########################################################################
+
+  cbPalette_withoutdata <- c("#999999",  "#E69F00", "#56B4E9",  "#009E73", "#CC79A7", "#D55E00",  "#F0E442")
+
+  if (plots) {
+    require(tidyverse)
+    Lbounds = cbind(Lipschitz_notw,
+                    Lipschitz_LW,
+                    Lipschitz_LW_final) %>% as_tibble()
+    names(Lbounds) = c("Unweighted", "LW", "LW_final")
+    Lbounds_long = reshape2::melt(Lbounds)
+    plot_L <- ggplot(Lbounds_long, aes(x = variable, y = value, fill = variable, color = variable)) +
+      geom_violin(trim=TRUE, alpha = 0.3) +
+      scale_colour_manual(values = cbPalette_withoutdata) + scale_fill_manual(values = cbPalette_withoutdata) +
+      theme_bw(base_size = 15)   +
+      theme(legend.position = "none")  +
+      ylab("Lipschitz Bounds") + xlab("")
+    plot_L
+
+    df1 <- data.frame(weights_LW, Lipschitz_LW)
+    names(df1) <- c("weights", "Lipchitz")
+    plot_weightsL_1 <- ggplot(df1, aes(x = weights, y = Lipchitz)) +
+      geom_point() +
+      theme_bw(base_size = 15) + ggtitle("LW") +
+      geom_hline(yintercept=max(Lipschitz_LW),
+                 linetype="dashed", color = "red", size=2) +
+      xlim(0, 1)
+
+    df2 <- data.frame(weights_LW_final, Lipschitz_LW_final)
+    names(df2) <- c("weights", "Lipchitz")
+    plot_weightsL_2 <- ggplot(df2, aes(x = weights, y = Lipchitz)) +
+      geom_point() +
+      theme_bw(base_size = 15) + ggtitle("LW_final") +
+      geom_hline(yintercept=max(Lipschitz_LW_final),
+                 linetype="dashed", color = "red", size=2) +
+      xlim(0, 1)
+
+    require(gridExtra)
+    grid.arrange(plot_weightsL_1, plot_weightsL_2, ncol = 2)
+  }
+
+  return(syndata)
+}
