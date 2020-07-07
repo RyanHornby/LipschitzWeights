@@ -105,6 +105,7 @@ log_like_hamming = function(res, thresh = 1.00, risks_method = "linear",
 syn = function(data, modelString = "outcome ~ 1", chains = 1, iterations = 1000,
                scale_factor = 1.0, shift_factor = 0.0, c = 0.95, thresh = 1.00,
                risks_method = "linear", m = 20, thin = 5, plots = FALSE) {
+
   require(rstanarm)
   ###########################################################################
   ######################## unweighted, fit, and DP risks ####################
@@ -229,13 +230,13 @@ syn = function(data, modelString = "outcome ~ 1", chains = 1, iterations = 1000,
                     Lipschitz_LW_final) %>% as_tibble()
     names(Lbounds) = c("Unweighted", "LW", "LW_final")
     Lbounds_long = reshape2::melt(Lbounds)
-    plot_L <- ggplot(Lbounds_long, aes(x = variable, y = value, fill = variable, color = variable)) +
+    plot_L = ggplot(Lbounds_long, aes(x = variable, y = value, fill = variable, color = variable)) +
       geom_violin(trim=TRUE, alpha = 0.3) +
       scale_colour_manual(values = cbPalette_withoutdata) + scale_fill_manual(values = cbPalette_withoutdata) +
       theme_bw(base_size = 15)   +
       theme(legend.position = "none")  +
       ylab("Lipschitz Bounds") + xlab("")
-    plot_L
+    print(plot_L)
 
     df1 <- data.frame(weights_LW, Lipschitz_LW)
     names(df1) <- c("weights", "Lipchitz")
@@ -256,7 +257,7 @@ syn = function(data, modelString = "outcome ~ 1", chains = 1, iterations = 1000,
       xlim(0, 1)
 
     require(gridExtra)
-    grid.arrange(plot_weightsL_1, plot_weightsL_2, ncol = 2)
+    print(grid.arrange(plot_weightsL_1, plot_weightsL_2, ncol = 2))
   }
 
   return(syndata)
