@@ -16,21 +16,22 @@ log_like_hamming = function(res, thresh = 1.00, risks_method = "linear",
   N                 <- ncol(log_lik)
   S                 <- nrow(log_lik)
 
-  log_ratio         <- matrix(0,S,N)
+  #log_ratio         <- matrix(0,S,N)
+  log_ratio = abs(log_lik)
   log_ratio_theta   <- matrix(0,S,1)
-  pos               <- rep(TRUE,N)
+  #pos               <- rep(TRUE,N)
 
-  for( s in 1:S )
-  {
-    log_like_xs  <- sum(log_lik[s,]) ## full data
-    for(i in 1:N)
-    {
-      pos_i               <- pos
-      pos_i[i]            <- FALSE
-      log_like_xsi        <- sum(log_lik[s,pos_i])
-      log_ratio[s,i]      <- abs(log_like_xs - log_like_xsi) ## L in 3.1(b)
-    } ## leave-one-out neighborhood
-  } ## end loop over S MCMC iterations
+  #for( s in 1:S )
+  #{
+  #  log_like_xs  <- sum(log_lik[s,]) ## full data
+  #  for(i in 1:N)
+  #  {
+  #    pos_i               <- pos
+  #    pos_i[i]            <- FALSE
+  #    log_like_xsi        <- sum(log_lik[s,pos_i])
+  #    log_ratio[s,i]      <- abs(log_like_xs - log_like_xsi) ## L in 3.1(b)
+  #  } ## leave-one-out neighborhood
+  #} ## end loop over S MCMC iterations
   log_ratio_theta         <- rowMaxs(log_ratio, value = TRUE) ## S x 1 (by row) maxima of log-ratio over records for *each* MCMC draw
   L                       <- quantile(log_ratio_theta,thresh)
   S_excl                  <- which(log_ratio_theta > L) ## Excluded MCMC iterations based on thres log_ratio_theta
